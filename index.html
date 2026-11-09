@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scan &amp; Bill</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mu:#6b7280;--bd:#e3e6ea;--ac:#0f766e;--acx:#fff;--dg:#b91c1c;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111418;--card:#1a1f26;--tx:#eceff3;--mu:#98a1ad;--bd:#2b323b;--ac:#2dd4bf;--acx:#06201d;--dg:#f87171;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#111418;--card:#1a1f26;--tx:#eceff3;--mu:#98a1ad;--bd:#2b323b;--ac:#2dd4bf;--acx:#06201d;--dg:#f87171;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:720px;margin:0 auto;padding:12px}
+h1{font-size:20px;margin:6px 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
+button{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:10px 14px;border-radius:10px;cursor:pointer}
+button.p{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button.d{color:var(--dg)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input,select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px;min-width:0}
+.msg{font-size:14px;color:var(--mu);margin-top:8px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:6px 4px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+td input{width:100%}
+td.n input{min-width:110px}.num input{width:72px;text-align:right}
+.tot{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:16px;align-items:center}
+.tot .big{font-size:24px;font-weight:700;color:var(--ac)}
+.tot div:nth-child(even){text-align:right}
+dialog{border:1px solid var(--bd);border-radius:14px;background:var(--card);color:var(--tx);width:min(94vw,440px);max-height:92vh;overflow:auto}
+dialog label{display:block;font-size:13px;color:var(--mu);margin-top:8px}
+dialog input{width:100%}
+#f_img{width:100%;max-height:170px;object-fit:contain;border-radius:8px;background:var(--bg);margin-bottom:4px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.chips button{padding:4px 10px;font-size:13px;border-radius:99px}
+.empty{color:var(--mu);text-align:center;padding:16px}
+</style>
+</head>
+<body>
+<main>
+<h1>Scan &amp; Bill</h1>
+
+<div class="card">
+  <div class="row">
+    <button class="p" id="scanBtn">📷 Scan item</button>
+    <input type="file" id="scanIn" accept="image/*" capture="environment" hidden>
+    <button id="manualBtn">Add manually</button>
+  </div>
+  <div class="msg" id="msg">Tap Scan item and take one photo of the whole label. The barcode, price and date are all read from that one photo.</div>
+</div>
+
+<div class="card">
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Item</th><th>Mfg date</th><th>Price</th><th>Qty</th><th>Amount</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <div class="empty" id="empty">No items yet.</div>
+</div>
+
+<div class="card">
+  <div class="tot">
+    <div>Subtotal</div><div id="sub">0.00</div>
+    <div>Discount
+      <select id="dtype"><option value="pct">%</option><option value="amt">₹</option></select>
+      <input id="dval" type="number" min="0" step="any" value="0" style="width:90px" inputmode="decimal">
+    </div><div id="damt">− 0.00</div>
+    <div><b>Total to pay</b></div><div class="big" id="grand">₹0.00</div>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <button class="p" id="xlsBtn">Save to Excel</button>
+    <button class="d" id="newBtn">New bill</button>
+  </div>
+  <div class="msg" id="msg2"></div>
+</div>
+</main>
+
+<div id="reader" style="position:absolute;left:-9999px;width:300px"></div>
+
+<dialog id="dlg">
+  <form method="dialog" id="frm">
+    <b>Check item details</b>
+    <img id="f_img" alt="" hidden>
+    <div class="msg" id="f_hint">Tap a suggestion under a field to fill it, or type. If something is missing (dot-matrix print is hard to read), type it in.</div>
+    <label>Barcode / code</label><input id="f_code">
+    <label>Item name</label><input id="f_name" required list="dl"><datalist id="dl"></datalist><div class="chips" id="c_name"></div>
+    <label>Date of manufacture</label><input id="f_mfg" type="date"><div class="chips" id="c_mfg"></div>
+    <label>Cost / price (₹)</label><input id="f_price" type="number" step="any" min="0" inputmode="decimal" required><div class="chips" id="c_price"></div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button type="button" id="dcancel">Cancel</button>
+      <button class="p" type="submit">Add to bill</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var items=[], master={}, worker=null, imgUrl='';
+
+  function load(){try{master=JSON.parse(localStorage.getItem('sb_master')||'{}')}catch(e){master={}}
+    try{items=JSON.parse(localStorage.getItem('sb_bill')||'[]')}catch(e){items=[]}}
+  function save(){try{localStorage.setItem('sb_master',JSON.stringify(master));localStorage.setItem('sb_bill',JSON.stringify(items))}catch(e){}}
+  function money(n){return (Math.round(n*100)/100).toFixed(2)}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function pad(n){return (n<10?'0':'')+n}
+
+  /* ---------- bill table ---------- */
+  function totals(){
+    var sub=items.reduce(function(a,i){return a+(+i.price||0)*(+i.qty||0)},0);
+    var dv=+$('dval').value||0, d=$('dtype').value==='pct'?sub*dv/100:dv;
+    if(d>sub)d=sub; if(d<0)d=0; return {sub:sub,d:d,grand:sub-d};
+  }
+  function updTotals(){var t=totals();$('sub').textContent=money(t.sub);$('damt').textContent='− '+money(t.d);$('grand').textContent='₹'+money(t.grand)}
+  function render(){
+    var h='';
+    items.forEach(function(it,i){
+      h+='<tr><td>'+(i+1)+'</td>'+
+      '<td class="n"><input data-i="'+i+'" data-k="name" value="'+esc(it.name)+'"></td>'+
+      '<td><input type="date" data-i="'+i+'" data-k="mfg" value="'+esc(it.mfg)+'"></td>'+
+      '<td class="num"><input type="number" step="any" inputmode="decimal" data-i="'+i+'" data-k="price" value="'+esc(it.price)+'"></td>'+
+      '<td class="num"><input type="number" step="1" min="1" inputmode="numeric" data-i="'+i+'" data-k="qty" value="'+esc(it.qty)+'"></td>'+
+      '<td>'+money((+it.price||0)*(+it.qty||0))+'</td><td><button class="d" data-del="'+i+'">✕</button></td></tr>';
+    });
+    $('rows').innerHTML=h; $('empty').style.display=items.length?'none':'block'; updTotals();
+  }
+  $('rows').addEventListener('input',function(e){
+    var i=e.target.getAttribute('data-i'); if(i===null)return;
+    items[i][e.target.getAttribute('data-k')]=e.target.value; save();
+    e.target.closest('tr').children[5].textContent=money((+items[i].price||0)*(+items[i].qty||0)); updTotals();
+  });
+  $('rows').addEventListener('click',function(e){var d=e.target.getAttribute('data-del'); if(d===null)return; items.splice(+d,1); save(); render()});
+  $('dval').addEventListener('input',updTotals); $('dtype').addEventListener('change',updTotals);
+  function addItem(o){items.push({code:o.code||'',name:o.name||'',mfg:o.mfg||'',price:o.price||0,qty:1,time:new Date().toLocaleString()});save();render();window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'})}
+
+  /* ---------- details form with tap-to-fill suggestions ---------- */
+  function chips(id,list,field,label){
+    var box=$(id); box.innerHTML='';
+    list.forEach(function(v){var b=document.createElement('button');b.type='button';b.textContent=label?label(v):v;b.onclick=function(){$(field).value=v};box.appendChild(b)});
+  }
+  function openForm(code,o,cand,imgSrc){
+    o=o||{}; cand=cand||{};
+    $('f_code').value=code||''; $('f_name').value=o.name||''; $('f_mfg').value=o.mfg||''; $('f_price').value=o.price||'';
+    chips('c_name',cand.names||[],'f_name'); chips('c_mfg',cand.dates||[],'f_mfg'); chips('c_price',cand.prices||[],'f_price');
+    $('dl').innerHTML=Object.keys(master).filter(function(k){return k.indexOf('n:')===0}).map(function(k){return '<option value="'+esc(master[k].name)+'">'}).join('');
+    $('f_img').hidden=!imgSrc; if(imgSrc)$('f_img').src=imgSrc;
+    $('f_hint').hidden=!(cand.names||cand.dates||cand.prices);
+    try{$('dlg').showModal()}catch(e){$('dlg').setAttribute('open','')}
+  }
+  $('dcancel').onclick=function(){$('dlg').close()};
+  $('frm').addEventListener('submit',function(){
+    var o={code:$('f_code').value.trim(),name:$('f_name').value.trim(),mfg:$('f_mfg').value,price:parseFloat($('f_price').value)||0};
+    if(o.code)master[o.code]={name:o.name,mfg:o.mfg,price:o.price};
+    if(o.name)master['n:'+o.name.toLowerCase()]={name:o.name,mfg:o.mfg,price:o.price};
+    addItem(o); $('msg').textContent='Added: '+o.name;
+  });
+  $('manualBtn').onclick=function(){openForm('')};
+  $('f_name').addEventListener('change',function(){var m=master['n:'+this.value.trim().toLowerCase()]; if(m){if(!$('f_price').value)$('f_price').value=m.price; if(!$('f_mfg').value)$('f_mfg').value=m.mfg}});
+
+  /* ---------- label text parsing ---------- */
+  var MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  var DATE_RE='(\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}|\\d{1,2}[\\/\\-.]\\d{4}|\\d{0,2}[ .,\\-\\/]*[A-Za-z]{3,9}[ .,\\-\\/]*\\d{2,4})';
+  function toISO(s){
+    s=s.trim(); var m;
+    if((m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/))){var y=+m[3]; if(y<100)y+=2000; var d=+m[1],mo=+m[2]; if(mo>12){var t=d;d=mo;mo=t} if(mo<1||mo>12||d<1||d>31||y<2000||y>2100)return ''; return y+'-'+pad(mo)+'-'+pad(d)}
+    if((m=s.match(/^(\d{1,2})[\/\-.](\d{4})$/))){if(+m[1]<1||+m[1]>12||+m[2]<2000||+m[2]>2100)return ''; return m[2]+'-'+pad(+m[1])+'-01'}
+    if((m=s.match(/^(\d{1,2})?[ .,\-\/]*([A-Za-z]{3})[A-Za-z]*[ .,\-\/]*(\d{2,4})$/))){var mo2=MON[m[2].toLowerCase()]; if(!mo2)return ''; var y2=+m[3]; if(y2<100)y2+=2000; if(y2<2000||y2>2100)return ''; return y2+'-'+pad(mo2)+'-'+pad(+m[1]||1)}
+    return '';
+  }
+  function fixDigits(t){ /* OCR often reads 0 as O, 1 as l/I, 5 as S inside dates */
+    return t.replace(/[\dOoIl|S\/\-.]{6,12}/g,function(tok){return (/\d/.test(tok)&&/[\/\-.]/.test(tok))?tok.replace(/[Oo]/g,'0').replace(/[Il|]/g,'1').replace(/S/g,'5'):tok});
+  }
+  function uniq(a){var s={};return a.filter(function(x){if(!x||s[x])return false;s[x]=1;return true})}
+  function parseLabel(raw,lines){
+    var text=fixDigits(raw.replace(/[|]/g,'1')), out={name:'',mfg:'',price:'',code:''}, cand={names:[],dates:[],prices:[]};
+    /* ---- dates: manufacture date is never in the future and is the earliest recent date ---- */
+    var now=Date.now(), hi=new Date(now+31*864e5).toISOString().slice(0,10), lo=new Date(now-4*365*864e5).toISOString().slice(0,10);
+    var kw=text.match(new RegExp('(?:mfg|mfd|manufactur\\w*|pkd|packed|packaging|pack\\s*date|mf\\.?\\s*date)\\b[^\\d\\n]{0,16}'+DATE_RE,'i'));
+    var kd=kw?toISO(kw[1]):'';
+    var all=uniq((text.match(new RegExp(DATE_RE,'g'))||[]).map(toISO)).filter(function(d){return d>=lo}).sort();
+    var past=all.filter(function(d){return d<=hi});
+    out.mfg=(kd&&kd>=lo&&kd<=hi)?kd:(past[0]||all[0]||'');
+    cand.dates=uniq([out.mfg].concat(all)).slice(0,6);
+    /* ---- price: ignore unit prices, weights, batch numbers, dates ---- */
+    var bare=text.replace(/\(?\s*(?:usp|unit\s*(?:sale\s*)?price)[^\n]*/ig,' ')
+      .replace(/\d[\d.,]*\s*\/\s*(?:ml|g|gm|kg|l|ltr|mg|pc|no)\b[^\n]*/ig,' ')
+      .replace(new RegExp(DATE_RE,'g'),' ').replace(/\b\d{6,}\b/g,' ')
+      .replace(/\b[A-Za-z0-9\-]*[A-Za-z][A-Za-z0-9\-]*\d[A-Za-z0-9\-]*\b|\b[A-Za-z0-9\-]*\d[A-Za-z0-9\-]*[A-Za-z][A-Za-z0-9\-]*\b/g,' ')
+      .replace(/\d+(?:[.,]\d+)?\s*(?:ml|g|gm|gms|kg|l|ltr|mg|kcal|cal|pcs|units?|%)(?![A-Za-z])/ig,' ');
+    var KP='(?:^|[^A-Za-z])(?:m\\.?\\s*r\\.?\\s*p\\.?|price|rs|\\u20b9|inr)';
+    var k2=bare.match(new RegExp(KP+'[^\\d\\n]{0,14}?(\\d{1,6}[.,]\\d{2})','i')), k1=bare.match(new RegExp(KP+'[^\\d\\n]{0,10}(\\d{1,6})','i'));
+    var nums=(bare.match(/\d{1,5}(?:[.,]\d{1,2})?/g)||[]).map(function(x){return x.replace(',','.')}).filter(function(x){return +x>0&&+x<100000});
+    var d2=nums.filter(function(x){return /\.\d\d$/.test(x)}), d1=nums.filter(function(x){return /\./.test(x)&&!/\.\d\d$/.test(x)}), ints=nums.filter(function(x){return !/\./.test(x)&&+x>=2});
+    cand.prices=uniq([k2&&k2[1].replace(',','.'),k1&&k1[1]].concat(d2,d1,ints)).slice(0,8); out.price=cand.prices[0]||'';
+    var c=text.match(/\b\d{8,14}\b/); if(c)out.code=c[0];
+    /* ---- name: biggest printed lines first ---- */
+    var src=(lines&&lines.length)?lines.slice().sort(function(a,b){return b.h-a.h}).map(function(l){return l.text}):raw.split(/\n/);
+    var nm=src.map(function(s){return s.replace(/[^A-Za-z0-9 &\-\.]/g,'').replace(/\s+/g,' ').trim()}).filter(function(s){
+      var L=(s.match(/[A-Za-z]/g)||[]).length; return s.length>=3&&s.length<=40&&L>=3&&L/s.length>0.6&&!/mrp|mfg|mfd|pkd|price|exp|best|batch|net|qty|rs\.|barcode|date|use by|lic|fssai|marketed|packed|ingredients/i.test(s)});
+    cand.names=uniq(nm).slice(0,6); out.name=cand.names[0]||'';
+    return {o:out,cand:cand};
+  }
+
+  /* ---------- image helpers ---------- */
+  function drawImg(file,max,ang,norm){return new Promise(function(res){
+    var img=new Image(); img.onload=function(){
+      var r=max/Math.max(img.width,img.height); if(!norm)r=Math.min(1,r);
+      var w=Math.round(img.width*r),h=Math.round(img.height*r),sw=(ang%180)?h:w,sh=(ang%180)?w:h;
+      var c=document.createElement('canvas'); c.width=sw; c.height=sh; var x=c.getContext('2d');
+      x.translate(sw/2,sh/2); x.rotate(ang*Math.PI/180); x.drawImage(img,-w/2,-h/2,w,h);
+      if(norm){ /* even out lighting: divide by a blurred copy, so shiny/shadowed bottles read cleanly */
+        var d=x.getImageData(0,0,sw,sh),p=d.data,i,g,bv;
+        var bw=Math.max(2,Math.round(sw/24)),bh=Math.max(2,Math.round(sh/24));
+        var s=document.createElement('canvas'); s.width=bw; s.height=bh; s.getContext('2d').drawImage(c,0,0,bw,bh);
+        var b=document.createElement('canvas'); b.width=sw; b.height=sh; var bx=b.getContext('2d'); bx.imageSmoothingEnabled=true; bx.drawImage(s,0,0,sw,sh);
+        var bp=bx.getImageData(0,0,sw,sh).data;
+        for(i=0;i<p.length;i+=4){g=p[i]*0.3+p[i+1]*0.59+p[i+2]*0.11;bv=bp[i]*0.3+bp[i+1]*0.59+bp[i+2]*0.11;g=Math.min(255,g/(bv+1)*215);p[i]=p[i+1]=p[i+2]=g}
+        x.putImageData(d,0,0)}
+      URL.revokeObjectURL(img.src); c.toBlob(function(bl){res(bl||file)},'image/jpeg',0.92)};
+    img.onerror=function(){res(file)}; img.src=URL.createObjectURL(file)})}
+
+  function findBarcode(file){
+    var tries=[1800,1100].map(function(m){return function(){return drawImg(file,m,0,false).then(function(b){
+      if('BarcodeDetector' in window){
+        return createImageBitmap(b).then(function(bm){return new BarcodeDetector().detect(bm)}).then(function(r){return r.length?r[0].rawValue:Promise.reject()});
+      }
+      return new Html5Qrcode('reader').scanFile(new File([b],'a.jpg',{type:'image/jpeg'}),false)})}});
+    return tries.reduce(function(p,t){return p.catch(t)},Promise.reject()).catch(function(){return ''});
+  }
+  function getWorker(){if(!worker)worker=Tesseract.createWorker('eng'); return worker}
+  function goodWords(r){var s=0,ws=r.data.words;
+    if(ws&&ws.length){ws.forEach(function(w){if(w.confidence>=70&&w.text.replace(/[^A-Za-z]/g,'').length>=4)s+=w.text.length})}
+    else{(r.data.text.match(/[A-Za-z]{4,}/g)||[]).forEach(function(w){s+=w.length})}
+    return s}
+  function lineList(r){return (r.data.lines||[]).map(function(l){return {text:(l.text||'').trim(),h:l.bbox?l.bbox.y1-l.bbox.y0:0}})}
+  /* finds the upright direction (phone photos are often sideways), reads at high resolution, second pass only if needed */
+  function readText(file){
+    return getWorker().then(function(w){
+      var best=0,bs=-1,s0=0;
+      return w.setParameters({tessedit_pageseg_mode:'6'}).then(function(){
+        return [0,90,180,270].reduce(function(p,a){return p.then(function(){
+          if(a&&s0>=25)return;
+          return drawImg(file,1000,a,true).then(function(im){return w.recognize(im)}).then(function(r){var s=goodWords(r); if(a===0)s0=s; if(s>bs+(a?10:0)){bs=s;best=a}})})},Promise.resolve());
+      }).then(function(){return drawImg(file,3000,best,true)}).then(function(img){
+        return w.recognize(img).then(function(a){
+          var txt=a.data.text, lines=lineList(a), pr=parseLabel(txt,lines);
+          if(pr.o.price&&pr.o.mfg)return {txt:txt,lines:lines};
+          return w.setParameters({tessedit_pageseg_mode:'11'}).then(function(){return w.recognize(img)}).then(function(b){return {txt:txt+'\n'+b.data.text,lines:lines.concat(lineList(b))}});
+        });
+      });
+    });
+  }
+
+  /* ---------- one button: barcode + text from one photo ---------- */
+  $('scanBtn').onclick=function(){$('scanIn').click()};
+  $('scanIn').addEventListener('change',function(){
+    var f=this.files&&this.files[0]; this.value=''; if(!f)return;
+    if(typeof Tesseract==='undefined'||typeof Html5Qrcode==='undefined'){$('msg').textContent='Reader did not load. Check your internet and reload.';return}
+    if(imgUrl)URL.revokeObjectURL(imgUrl); imgUrl=URL.createObjectURL(f);
+    $('msg').textContent='Reading barcode…';
+    findBarcode(f).then(function(code){
+      if(code&&master[code]){var m=master[code];addItem({code:code,name:m.name,mfg:m.mfg,price:m.price});$('msg').textContent='Added saved item: '+m.name+'. Scan the next item.';return}
+      $('msg').textContent='Reading label… (first time can take up to 30 seconds)';
+      return readText(f).then(function(t){
+        var r=parseLabel(t.txt,t.lines); if(code)r.o.code=code; var o=r.o;
+        $('msg').textContent='Check the details, fix if needed, then tap Add to bill.';
+        openForm(o.code,o,r.cand,imgUrl);
+      });
+    }).catch(function(){$('msg').textContent='Could not read the label. You can fill it in by hand.'; openForm('',{},null,imgUrl)});
+  });
+
+  $('newBtn').onclick=function(){ if(items.length&&!confirm('Clear all items and start a new bill?'))return; items=[];$('dval').value=0;save();render();$('msg2').textContent=''};
+
+  $('xlsBtn').onclick=function(){
+    if(!items.length){$('msg2').textContent='Nothing to save yet.';return}
+    var t=totals();
+    var rows=[['#','Code','Item','Date of manufacture','Price (₹)','Qty','Amount (₹)','Scanned at']];
+    items.forEach(function(it,i){rows.push([i+1,it.code,it.name,it.mfg,+it.price||0,+it.qty||0,(+it.price||0)*(+it.qty||0),it.time])});
+    rows.push([]);rows.push(['','','','','','Subtotal',t.sub]);rows.push(['','','','','','Discount',-t.d]);rows.push(['','','','','','Total',t.grand]);
+    var ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:4},{wch:16},{wch:26},{wch:18},{wch:11},{wch:6},{wch:12},{wch:20}];
+    var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Bill');
+    var data=XLSX.write(wb,{bookType:'xlsx',type:'array'}), fn='bill-'+new Date().toISOString().slice(0,10)+'.xlsx';
+    var done=function(){$('msg2').textContent='Saved '+fn};
+    if(window.claude&&claude.use){
+      claude.use('downloads').then(function(dl){
+        if(!dl){$('msg2').textContent='Download is not available here. Open this page in your browser to save the file.';return}
+        dl.save({filename:fn,data:new Uint8Array(data)}).then(done).catch(function(e){$('msg2').textContent=(e&&e.code==='declined')?'Save cancelled.':'Could not save file.'});
+      });
+    }else{var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/octet-stream'}));a.download=fn;a.click();done()}
+  };
+  load(); render();
+})();
+</script>
+</body>
+</html>
